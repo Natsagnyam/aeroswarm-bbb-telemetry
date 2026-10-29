@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AeroSwarm Ground Station Dashboard</title>
+    <style>
+        body { font-family: 'Segoe UI', monospace; background: #0b0f19; color: #38bdf8; margin: 0; padding: 20px; }
+        h1 { color: #f8fafc; font-size: 1.4rem; border-bottom: 2px solid #1e293b; padding-bottom: 12px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+        .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 8px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+        .card h3 { margin: 0 0 8px 0; color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+        .metric { font-size: 1.8rem; font-weight: bold; color: #f8fafc; }
+        .status-NOMINAL { color: #4ade80; }
+        .status-TRACKING_TARGET { color: #facc15; }
+        .status-EVASIVE_MANEUVER { color: #f87171; }
+        .status-SAFE_MODE_NATSKA { color: #c084fc; }
+        
+        /* Plot Canvas Styling */
+        .chart-container { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        canvas { background: #090d16; border: 1px solid #1e293b; border-radius: 6px; width: 100%; height: 180px; }
+
+        #log { background: #090d16; border: 1px solid #1e293b; padding: 10px; height: 140px; overflow-y: auto; font-size: 0.8rem; color: #cbd5e1; border-radius: 6px; margin-top: 20px; font-family: monospace; }
+        .connection-status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ef4444; margin-right: 8px; }
+        .connected { background: #22c55e !important; }
+    </style>
+</head>
+<body>
+    <h1>
+        <span id="conn-dot" class="connection-status"></span> 
+        AeroSwarm C2 Space Ground Station Monitor
+        <span style="font-size: 0.8rem; float: right; color: #64748b;" id="ws-url">ws://127.0.0.1:8766</span>
+    </h1>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Flight State Machine</h3>
+            <div id="flight-state" class="metric">DISCONNECTED</div>
+        </div>
+        <div class="card">
+            <h3>Threat Distance</h3>
+            <div id="threat-dist" class="metric">--.-- m</div>
+        </div>
+        <div class="card">
+            <h3>CPU Load</h3>
+            <div id="cpu-load" class="metric">-- %</div>
+        </div>
+        <div class="card">
+            <h3>Battery Voltage</h3>
+            <div id="battery" class="metric">-- V</div>
+        </div>
+    </div>
+
+    <!-- Live Telemetry Plot Graphs -->
+    <div class="chart-container">
+        <div class="card">
+            <h3>Real-Time Threat Proximity (Meters)</h3>
+            <canvas id="threatChart"></canvas>
+        </div>
+        <div class="card">
+            <h3>System Bus Health (Voltage & CPU %)</h3>
+            <canvas id="systemChart"></canvas>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 20px;">
+        <h3>Live Telemetry Packet Stream</h3>
+        <div id="log">Connecting to WebSocket telemetry bridge...<br></div>
+    </div>
+
+    <script>
+        const wsUri = "ws://127.0.0.1:8766";
+        const connDot = document.getElementById('conn-dot');
+        const stateEl = document.getElementById('flight-state');
+        const distEl = document.getElementById('threat-dist');
+        const cpuEl = document.getElementById('cpu-load');
+        const battEl = document.getElementById('battery');
+        const logEl = document.getElementById('log');
+
+        // Circular Buffer for Chart History
+        const maxPoints = 30;
+        const threatHistory = [];
+        const cpuHistory = [];
+        const voltHistory = [];
+
+        function initCanvas(id) {
+            const canvas = document.getElementById(id);
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+            return canvas;
+        }
+
+        const threatCanvas = initCanvas('threatChart');
+        const systemCanvas = initCanvas('systemChart');
+
+        function drawPlot(canvas, dataSeriesArray, colors, yMin, yMax) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            
+            ctx.clearRect(0, 0, w, h);
+            
+            // Draw Gridlines
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            for(let i = 0; i < h; i += 30) {
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(w, i); ctx.stroke();
+            }
+
+            // Draw Data Lines
+            dataSeriesArray.forEach((series, sIdx) => {
+                if (series.length < 2) return;
+                ctx.strokeStyle = colors[sIdx];
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                const step = w / (maxPoints - 1);
+                series.forEach((val, i) => {
+                    const normY = (val - yMin) / (yMax - yMin);
+                    const x = i * step;
+                    const y = h - (normY * (h - 20) + 10);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+            });
+        }
+
+        function connect() {
+            const ws = new WebSocket(wsUri);
+
+            ws.onopen = () => {
+                connDot.classList.add('connected');
+                logEl.innerHTML += `[Bridge] Connection Established.<br>`;
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                // Update Metrics
+                stateEl.innerText = data.flight_state;
+                stateEl.className = "metric status-" + data.flight_state;
+                distEl.innerText = data.threat_distance_meters.toFixed(2) + " m";
+                cpuEl.innerText = data.cpu_load_percent + " %";
+                battEl.innerText = data.battery_voltage.toFixed(2) + " V";
+
+                // Push history for charts
+                if (threatHistory.length >= maxPoints) threatHistory.shift();
+                if (cpuHistory.length >= maxPoints) cpuHistory.shift();
+                if (voltHistory.length >= maxPoints) voltHistory.shift();
+
+                threatHistory.push(data.threat_distance_meters);
+                cpuHistory.push(data.cpu_load_percent);
+                voltHistory.push(data.battery_voltage);
+
+                // Render Canvas Charts
+                drawPlot(threatCanvas, [threatHistory], ['#f87171'], 0, 100);
+                drawPlot(systemCanvas, [cpuHistory, voltHistory], ['#38bdf8', '#4ade80'], 0, 50);
+
+                // Log entry
+                const line = `[Seq: ${data.sequence_number}] State: ${data.flight_state.padEnd(16)} | Threat: ${data.threat_distance_meters.toFixed(2)}m | Bat: ${data.battery_voltage}V | CPU: ${data.cpu_load_percent}%<br>`;
+                logEl.innerHTML += line;
+                logEl.scrollTop = logEl.scrollHeight;
+            };
+
+            ws.onclose = () => {
+                connDot.classList.remove('connected');
+                stateEl.innerText = "DISCONNECTED";
+                stateEl.className = "metric";
+                setTimeout(connect, 2000);
+            };
+        }
+
+        connect();
+    </script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+/home/natska/aeroswarm-telemetry/build/CMakeFiles/flight_engine.dir
+/home/natska/aeroswarm-telemetry/build/CMakeFiles/edit_cache.dir
+/home/natska/aeroswarm-telemetry/build/CMakeFiles/rebuild_cache.dir
