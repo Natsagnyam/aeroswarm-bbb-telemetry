@@ -20,6 +20,21 @@ A high-performance, low-latency telemetry and hardware safety override engine en
 | Expansion Pin | SoC Ball | GPIO Controller | Global GPIO | Function |
 | :--- | :--- | :--- | :--- | :--- |
 | **`P9_12`** | `gpmc_ben1` | `GPIO1_28` | **GPIO 60** | Hardware Safety Override (`SAFE_MODE_NATSKA`) |
+The mapping from GPIO 60 (pin P9_12) to gpiochip1 line 28 is determined by the Texas Instruments AM335x SoC's hardware architecture, where GPIO pins are grouped into banks of 32 pins each.
+Here is the exact mathematical relationship used to calculate the chip index and local line offset:
+1. The Core Equation
+Let  be the global GPIO number (). Since each GPIO bank contains 32 pins, the bank index (chip number) and local line offset are derived using integer division and modulo arithmetic:
+
+$$\text{Bank Index} = \left\lfloor \frac{N}{32} \right\rfloor$$
+
+$$\text{Line Offset} = N \pmod{32}$$
+2. Step-by-Step Calculation
+Applying this to GPIO 60:
+    • Find the Chip Index (gpiochip number):
+$$\left\lfloor \frac{60}{32} \right\rfloor = \left\lfloor 1.875 \right\rfloor = 1 \implies \mathbf{gpiochip1}$$
+    • Find the Local Line Offset within the Bank:
+$$60 \pmod{32} = 60 - (1 \times 32) = 60 - 32 = \mathbf{28}$$
+This gives the exact arguments for the command: gpiochip1 and 28.
 
 ---
 
